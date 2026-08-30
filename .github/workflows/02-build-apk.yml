@@ -1,0 +1,115 @@
+name: 02 - build android apk
+
+on:
+  workflow_run:
+    workflows: ["01 - generate 3d assets"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: "4.4.1"
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: setup android sdk
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.1"
+
+      - name: install godot
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            -o godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip -d godot
+          mv godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot/godot
+          chmod +x godot/godot
+          ./godot/godot --version
+
+      - name: install godot android export templates
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            -o templates.tpz \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          unzip -q templates.tpz -d templates
+          find templates -type f -name 'android_release.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_release.apk" \;
+          find templates -type f -name 'android_debug.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_debug.apk" \;
+          find templates -type f -name 'android_source.zip' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_source.zip" \;
+          printf '%s\n' "${GODOT_VERSION}.stable" > "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/version.txt"
+          test -s "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_debug.apk"
+
+      - name: download generated assets
+        run: |
+          set -euo pipefail
+          mkdir -p generated
+          url=""
+          if [ -f generated/asset-source.txt ]; then
+            url=$(grep '^catbox=' generated/asset-source.txt | cut -d= -f2- || true)
+          fi
+          if [ -n "$url" ]; then
+            curl --fail --location --retry 3 "$url" -o /tmp/assets.tar.gz || true
+          fi
+          if [ ! -s /tmp/assets.tar.gz ]; then
+            echo "asset mirror unavailable; regenerating assets locally"
+            sudo apt-get update
+            sudo apt-get install -y blender
+            blender --background --python generator/blender/generate_assets.py
+          else
+            tar -xzf /tmp/assets.tar.gz
+          fi
+          mkdir -p assets
+          if [ -d generated/models ]; then cp -r generated/models assets/; fi
+          if [ -d generated/maps ]; then cp -r generated/maps assets/; fi
+
+      - name: validate project
+        run: |
+          set -euo pipefail
+          ./godot/godot --headless --path . --editor --quit --import
+
+      - name: build apk
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          ./godot/godot --headless --path . --export-debug "Android" build/swat-breach-protocol.apk
+          test -s build/swat-breach-protocol.apk
+          ls -lh build/swat-breach-protocol.apk
+
+      - name: upload apk to catbox
+        run: |
+          set -euo pipefail
+          url=$(curl --fail --silent --show-error \
+            -F 'reqtype=fileupload' \
+            -F 'fileToUpload=@build/swat-breach-protocol.apk' \
+            https://catbox.moe/user/api.php)
+          echo "catbox: $url" | tee build/download-links.txt
+
+      - name: upload apk to gofile
+        run: |
+          set -euo pipefail
+          response=$(curl --fail --silent --show-error \
+            -X POST https://upload.gofile.io/uploadfile \
+            -F 'file=@build/swat-breach-protocol.apk')
+          url=$(python -c 'import json,sys; print(json.loads(sys.stdin.read())["data"]["downloadPage"])' <<< "$response")
+          echo "gofile: $url" | tee -a build/download-links.txt
+
+      - name: show download links
+        run: cat build/download-links.txt

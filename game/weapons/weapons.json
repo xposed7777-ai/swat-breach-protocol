@@ -1,0 +1,17 @@
+{
+  "silent": true,
+  "weapons": [
+    {"id":"pistol_9mm","category":"handgun","magazine":15,"reserve":90,"model":"pistol_9mm.glb"},
+    {"id":"pistol_compact","category":"handgun","magazine":12,"reserve":84,"model":"pistol_9mm.glb"},
+    {"id":"pistol_heavy","category":"handgun","magazine":12,"reserve":72,"model":"pistol_9mm.glb"},
+    {"id":"smg_9mm","category":"smg","magazine":30,"reserve":180,"model":"carbine_556.glb"},
+    {"id":"smg_compact","category":"smg","magazine":25,"reserve":150,"model":"carbine_556.glb"},
+    {"id":"carbine_556","category":"rifle","magazine":30,"reserve":180,"model":"carbine_556.glb"},
+    {"id":"rifle_762","category":"rifle","magazine":30,"reserve":150,"model":"carbine_556.glb"},
+    {"id":"rifle_short","category":"rifle","magazine":20,"reserve":120,"model":"carbine_556.glb"},
+    {"id":"pump_shotgun","category":"shotgun","magazine":8,"reserve":48,"model":"pump_shotgun.glb"},
+    {"id":"semi_shotgun","category":"shotgun","magazine":6,"reserve":42,"model":"pump_shotgun.glb"},
+    {"id":"breach_shotgun","category":"shotgun","magazine":5,"reserve":35,"model":"pump_shotgun.glb"},
+    {"id":"training_rifle","category":"rifle","magazine":30,"reserve":180,"model":"carbine_556.glb"}
+  ]
+}

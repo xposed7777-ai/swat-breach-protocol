@@ -41,6 +41,10 @@ def cylinder(name, loc, radius, depth, rotation=(0, 0, 0), material=metal):
     return o
 
 
+def export_obj(path):
+    bpy.ops.wm.obj_export(filepath=str(path), export_materials=True, export_normals=True)
+
+
 def weapon(name, kind):
     bpy.ops.object.select_all(action="DESELECT")
     parts = []
@@ -69,8 +73,7 @@ def weapon(name, kind):
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
     bpy.ops.wm.save_as_mainfile(filepath=str(MODELS / f"{name}.blend"))
-    bpy.ops.object.select_all(action="SELECT")
-    bpy.ops.export_scene.gltf(filepath=str(MODELS / f"{name}.glb"), export_format="GLB", use_selection=True)
+    export_obj(MODELS / f"{name}.obj")
     bpy.ops.object.select_all(action="DESELECT")
     bpy.data.objects.remove(obj, do_unlink=True)
 
@@ -93,7 +96,7 @@ def room():
     bpy.ops.object.join()
     bpy.context.object.name = "training_room"
     bpy.ops.object.select_all(action="SELECT")
-    bpy.ops.export_scene.gltf(filepath=str(MAPS / "training_room.glb"), export_format="GLB", use_selection=True)
+    export_obj(MAPS / "training_room.obj")
     bpy.ops.wm.save_as_mainfile(filepath=str(MAPS / "training_room.blend"))
 
 weapon("pistol_9mm", "pistol")

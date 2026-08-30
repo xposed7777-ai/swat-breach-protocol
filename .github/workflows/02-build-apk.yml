@@ -14,9 +14,6 @@ permissions:
 env:
   godot_version: "4.4.1"
   android_home: "/usr/local/lib/android/sdk"
-  android_sdk_root: "/usr/local/lib/android/sdk"
-  ANDROID_HOME: "/usr/local/lib/android/sdk"
-  ANDROID_SDK_ROOT: "/usr/local/lib/android/sdk"
   android_platform: "android-35"
   android_build_tools: "35.0.1"
 
@@ -38,6 +35,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export ANDROID_HOME="$android_home"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
           test -d "$ANDROID_HOME"
           sdkmanager="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | sort | tail -n 1)"
           test -n "$sdkmanager"
@@ -107,6 +106,8 @@ jobs:
           set -euo pipefail
           mkdir -p build
           rm -f /tmp/swat-export-test.apk
+          export ANDROID_HOME="$android_home"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
           ./godot-bin/godot --headless --path . --export-debug "Android" /tmp/swat-export-test.apk
           test -s /tmp/swat-export-test.apk
           file /tmp/swat-export-test.apk
@@ -117,6 +118,8 @@ jobs:
           set -euo pipefail
           mkdir -p build
           rm -f build/swat-breach-protocol-debug.apk
+          export ANDROID_HOME="$android_home"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
           ./godot-bin/godot --headless --path . --export-debug "Android" build/swat-breach-protocol-debug.apk
           test -s build/swat-breach-protocol-debug.apk
           file build/swat-breach-protocol-debug.apk

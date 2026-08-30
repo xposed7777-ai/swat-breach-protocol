@@ -15,6 +15,8 @@ env:
   android_build_tools: "35.0.1"
   android_home: "/usr/local/lib/android/sdk"
   android_sdk_root: "/usr/local/lib/android/sdk"
+  ANDROID_HOME: "/usr/local/lib/android/sdk"
+  ANDROID_SDK_ROOT: "/usr/local/lib/android/sdk"
 
 jobs:
   build:
@@ -34,14 +36,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -d "$android_home"
-          sdkmanager=$(find "$android_home/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | sort | tail -n 1)
+          test -d "$ANDROID_HOME"
+          sdkmanager=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | sort | tail -n 1)
           test -n "$sdkmanager"
           yes | "$sdkmanager" --licenses >/dev/null || true
           "$sdkmanager" "platform-tools" "platforms;${android_platform}" "build-tools;${android_build_tools}"
-          test -d "$android_home/platforms/${android_platform}"
-          test -d "$android_home/build-tools/${android_build_tools}"
-          test -x "$android_home/platform-tools/adb"
+          test -d "$ANDROID_HOME/platforms/${android_platform}"
+          test -d "$ANDROID_HOME/build-tools/${android_build_tools}"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          "$ANDROID_HOME/platform-tools/adb" start-server >/dev/null
 
       - name: install godot
         shell: bash
@@ -83,6 +86,25 @@ jobs:
             -dname "CN=Android Debug,O=Android,C=US"
           test -s .ci/debug.keystore
 
+      - name: configure godot android settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+[gd_resource type="EditorSettings" format=3]
+
+[resource]
+export/android/android_sdk_path = "$ANDROID_HOME"
+export/android/java_sdk_path = "$JAVA_HOME"
+export/android/debug_keystore = "$GITHUB_WORKSPACE/.ci/debug.keystore"
+export/android/debug_keystore_user = "androiddebugkey"
+export/android/debug_keystore_pass = "android"
+EOF
+          test -f "$HOME/.config/godot/editor_settings-4.tres"
+          grep -F 'export/android/android_sdk_path' "$HOME/.config/godot/editor_settings-4.tres"
+          grep -F 'export/android/java_sdk_path' "$HOME/.config/godot/editor_settings-4.tres"
+
       - name: verify project files
         shell: bash
         run: |
@@ -115,6 +137,17 @@ jobs:
           if grep -Eqi 'SCRIPT ERROR|PARSE ERROR|ERROR:.*script' /tmp/godot-smoke.log; then
             exit 1
           fi
+
+      - name: validate android export configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./godot-bin/godot --headless --path . --export-debug "Android" /tmp/swat-config-test.apk >/tmp/godot-export-test.log 2>&1 || {
+            cat /tmp/godot-export-test.log
+            exit 1
+          }
+          test -s /tmp/swat-config-test.apk
+          rm -f /tmp/swat-config-test.apk
 
       - name: build android debug apk
         shell: bash

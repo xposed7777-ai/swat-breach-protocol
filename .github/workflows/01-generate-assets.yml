@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   PYTHON_VERSION: "3.12"
@@ -19,7 +19,7 @@ jobs:
       - name: setup python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "${{ env.PYTHON_VERSION }}"
 
       - name: install blender
         run: |
@@ -34,28 +34,40 @@ jobs:
           rm -rf generated
           mkdir -p generated
           blender --background --python generator/blender/generate_assets.py
+
           test -s generated/models/pistol_9mm.obj
           test -s generated/models/carbine_556.obj
           test -s generated/models/pump_shotgun.obj
           test -s generated/maps/training_room.obj
 
-      - name: validate generated files
+      - name: copy generated assets into repository tree
         run: |
           set -euo pipefail
-          find generated -type f -printf '%p %s bytes\n' | sort
-          test "$(find generated -type f | wc -l)" -gt 0
+          mkdir -p assets/models assets/maps
+          cp generated/models/*.obj assets/models/
+          cp generated/models/*.mtl assets/models/
+          cp generated/maps/*.obj assets/maps/
+          cp generated/maps/*.mtl assets/maps/
 
-      - name: package assets for the next workflow
+      - name: validate generated assets
         run: |
           set -euo pipefail
-          mkdir -p build
-          tar -czf build/swat-assets.tar.gz generated game
-          ls -lh build/swat-assets.tar.gz
+          echo "generated asset files:"
+          find assets -type f -printf '%p %s bytes\n' | sort
+          test "$(find assets -type f | wc -l)" -ge 8
 
-      - name: upload temporary workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: swat-generated-assets
-          path: build/swat-assets.tar.gz
-          retention-days: 1
-          compression-level: 0
+      - name: commit generated assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add assets/
+
+          if git diff --cached --quiet; then
+            echo "no asset changes"
+          else
+            git commit -m "generate 3d game assets"
+            git push origin HEAD:main
+          fi

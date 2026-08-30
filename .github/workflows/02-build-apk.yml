@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 env:
-  GODOT_VERSION: "4.4.1"
-  ANDROID_PLATFORM: "android-35"
-  ANDROID_BUILD_TOOLS: "35.0.1"
-  ANDROID_HOME: "/usr/local/lib/android/sdk"
-  ANDROID_SDK_ROOT: "/usr/local/lib/android/sdk"
+  godot_version: "4.4.1"
+  android_platform: "android-35"
+  android_build_tools: "35.0.1"
+  android_home: "/usr/local/lib/android/sdk"
+  android_sdk_root: "/usr/local/lib/android/sdk"
 
 jobs:
   build:
@@ -64,19 +64,6 @@ jobs:
           find templates -type f -name 'android_source.zip' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_source.zip" \;
           printf '%s\n' "${GODOT_VERSION}.stable" > "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/version.txt"
           test -s "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_debug.apk"
-
-      - name: configure godot android paths
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.config/godot"
-          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
-[gd_resource type="EditorSettings" format=3]
-
-[resource]
-export/android/android_sdk_path = "$ANDROID_HOME"
-export/android/java_sdk_path = "$JAVA_HOME"
-EOF
 
       - name: create debug keystore
         shell: bash
@@ -183,4 +170,4 @@ EOF
           if [ -f build/gofile-url.txt ]; then
             echo "gofile apk: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo "generated 3d assets remain in the github workflow artifact; gofile receives the apk only" >> "$GITHUB_STEP_SUMMARY"
+          echo "generated 3d assets remain in github artifacts; gofile receives the apk only" >> "$GITHUB_STEP_SUMMARY"

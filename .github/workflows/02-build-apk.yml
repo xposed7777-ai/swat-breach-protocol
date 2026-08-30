@@ -68,6 +68,32 @@ jobs:
           printf '%s\n' "${godot_version}.stable" > "$HOME/.local/share/godot/export_templates/${godot_version}.stable/version.txt"
           test -s "$HOME/.local/share/godot/export_templates/${godot_version}.stable/android_debug.apk"
 
+      - name: configure godot android editor settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="$android_home"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          test -n "${JAVA_HOME:-}"
+          test -d "$JAVA_HOME"
+          test -d "$ANDROID_HOME"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$GITHUB_WORKSPACE/.ci/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          export/android/shutdown_adb_on_exit = true
+          export/android/force_system_user = false
+          EOF
+          cat "$HOME/.config/godot/editor_settings-4.tres"
+
       - name: create debug keystore
         shell: bash
         run: |
@@ -92,6 +118,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export ANDROID_HOME="$android_home"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
           ./godot-bin/godot --headless --path . --editor --quit --import
 
       - name: gameplay smoke test
@@ -100,14 +128,16 @@ jobs:
           set -euo pipefail
           ./godot-bin/godot --headless --path . --script res://scripts/gameplay_smoke_test.gd
 
-      - name: android export test
+      - name: android export configuration test
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build
-          rm -f /tmp/swat-export-test.apk
           export ANDROID_HOME="$android_home"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$GITHUB_WORKSPACE/.ci/debug.keystore"
+          export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
+          export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
+          ./godot-bin/godot --headless --path . --editor --quit --import
           ./godot-bin/godot --headless --path . --export-debug "Android" /tmp/swat-export-test.apk
           test -s /tmp/swat-export-test.apk
           file /tmp/swat-export-test.apk
@@ -120,6 +150,9 @@ jobs:
           rm -f build/swat-breach-protocol-debug.apk
           export ANDROID_HOME="$android_home"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$GITHUB_WORKSPACE/.ci/debug.keystore"
+          export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
+          export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
           ./godot-bin/godot --headless --path . --export-debug "Android" build/swat-breach-protocol-debug.apk
           test -s build/swat-breach-protocol-debug.apk
           file build/swat-breach-protocol-debug.apk
@@ -153,4 +186,5 @@ jobs:
           echo "## swat: breach protocol" >> "$GITHUB_STEP_SUMMARY"
           if [ -f build/swat-breach-protocol-debug.apk ]; then echo "apk: built" >> "$GITHUB_STEP_SUMMARY"; else echo "apk: failed" >> "$GITHUB_STEP_SUMMARY"; fi
           if [ -f build/gofile-url.txt ]; then echo "gofile apk: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"; fi
+          echo "gameplay smoke test: runs before android export" >> "$GITHUB_STEP_SUMMARY"
           echo "assets: remain on github artifacts; gofile receives apk only" >> "$GITHUB_STEP_SUMMARY"

@@ -11,105 +11,131 @@ permissions:
 
 env:
   GODOT_VERSION: "4.4.1"
+  ANDROID_PLATFORM: "android-35"
+  ANDROID_BUILD_TOOLS: "35.0.1"
 
 jobs:
   build:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+
     steps:
       - name: checkout
         uses: actions/checkout@v4
 
-      - name: setup java 17
+      - name: setup java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: setup android sdk
+        uses: android-actions/setup-android@v3
+
+      - name: install android packages
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.1"
+          sdkmanager "platform-tools" "platforms;${ANDROID_PLATFORM}" "build-tools;${ANDROID_BUILD_TOOLS}"
 
       - name: install godot
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3 \
+          curl --fail --location --retry 4 --retry-delay 3 \
             -o godot.zip \
             "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
-          unzip -q godot.zip -d godot
-          mv godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot/godot
-          chmod +x godot/godot
-          ./godot/godot --version
+          unzip -q godot.zip -d godot-bin
+          mv "godot-bin/Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot-bin/godot
+          chmod +x godot-bin/godot
+          ./godot-bin/godot --version
 
-      - name: install godot android export templates
+      - name: install godot export templates
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3 \
+          curl --fail --location --retry 4 --retry-delay 3 \
             -o templates.tpz \
             "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
           mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
           unzip -q templates.tpz -d templates
-          find templates -type f -name 'android_release.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_release.apk" \;
           find templates -type f -name 'android_debug.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_debug.apk" \;
+          find templates -type f -name 'android_release.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_release.apk" \;
           find templates -type f -name 'android_source.zip' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_source.zip" \;
           printf '%s\n' "${GODOT_VERSION}.stable" > "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/version.txt"
           test -s "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_debug.apk"
 
-      - name: download generated assets
+      - name: verify project files
         run: |
           set -euo pipefail
-          mkdir -p generated
-          url=""
-          if [ -f generated/asset-source.txt ]; then
-            url=$(grep '^catbox=' generated/asset-source.txt | cut -d= -f2- || true)
-          fi
-          if [ -n "$url" ]; then
-            curl --fail --location --retry 3 "$url" -o /tmp/assets.tar.gz || true
-          fi
-          if [ ! -s /tmp/assets.tar.gz ]; then
-            echo "asset mirror unavailable; regenerating assets locally"
-            sudo apt-get update
-            sudo apt-get install -y blender
-            blender --background --python generator/blender/generate_assets.py
-          else
-            tar -xzf /tmp/assets.tar.gz
-          fi
-          mkdir -p assets
-          if [ -d generated/models ]; then cp -r generated/models assets/; fi
-          if [ -d generated/maps ]; then cp -r generated/maps assets/; fi
+          test -f project.godot
+          test -f export_presets.cfg
+          test -f scenes/main.tscn
+          test -f scripts/main.gd
+          find assets -type f -print | sort || true
 
-      - name: validate project
+      - name: godot import and script validation
         run: |
           set -euo pipefail
-          ./godot/godot --headless --path . --editor --quit --import
+          ./godot-bin/godot --headless --path . --editor --quit --import
 
-      - name: build apk
+      - name: headless gameplay smoke test
+        run: |
+          set -euo pipefail
+          timeout 12s ./godot-bin/godot --headless --path . --quit-after 8 >/tmp/godot-smoke.log 2>&1 || rc=$?
+          rc=${rc:-0}
+          cat /tmp/godot-smoke.log
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+            exit "$rc"
+          fi
+          if grep -Eqi 'SCRIPT ERROR|PARSE ERROR|ERROR:.*script' /tmp/godot-smoke.log; then
+            exit 1
+          fi
+
+      - name: build android debug apk
         run: |
           set -euo pipefail
           mkdir -p build
-          ./godot/godot --headless --path . --export-debug "Android" build/swat-breach-protocol.apk
-          test -s build/swat-breach-protocol.apk
-          ls -lh build/swat-breach-protocol.apk
+          ./godot-bin/godot --headless --path . --export-debug "Android" build/swat-breach-protocol-debug.apk
+          test -s build/swat-breach-protocol-debug.apk
+          file build/swat-breach-protocol-debug.apk
+          ls -lh build/swat-breach-protocol-debug.apk
 
-      - name: upload apk to catbox
-        run: |
-          set -euo pipefail
-          url=$(curl --fail --silent --show-error \
-            -F 'reqtype=fileupload' \
-            -F 'fileToUpload=@build/swat-breach-protocol.apk' \
-            https://catbox.moe/user/api.php)
-          echo "catbox: $url" | tee build/download-links.txt
+      - name: upload apk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swat-breach-protocol-debug-apk
+          path: build/swat-breach-protocol-debug.apk
+          retention-days: 7
+          compression-level: 0
 
       - name: upload apk to gofile
+        id: gofile
+        continue-on-error: true
         run: |
           set -euo pipefail
-          response=$(curl --fail --silent --show-error \
-            -X POST https://upload.gofile.io/uploadfile \
-            -F 'file=@build/swat-breach-protocol.apk')
-          url=$(python -c 'import json,sys; print(json.loads(sys.stdin.read())["data"]["downloadPage"])' <<< "$response")
-          echo "gofile: $url" | tee -a build/download-links.txt
+          response=$(curl --fail --silent --show-error --location --retry 3 \
+            -X POST \
+            -F 'file=@build/swat-breach-protocol-debug.apk' \
+            https://upload.gofile.io/uploadfile)
+          echo "$response" | tee build/gofile-response.json
+          url=$(python3 -c 'import json,sys; d=json.load(sys.stdin).get("data",{}); print(d.get("downloadPage") or d.get("directLink") or "")' <<< "$response")
+          if [ -z "$url" ]; then
+            echo "gofile did not return a download url"
+            exit 1
+          fi
+          printf '%s\n' "$url" > build/gofile-url.txt
+          echo "gofile: $url"
 
-      - name: show download links
-        run: cat build/download-links.txt
+      - name: publish build summary
+        if: always()
+        run: |
+          echo "## swat: breach protocol" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f build/swat-breach-protocol-debug.apk ]; then
+            echo "apk built successfully" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "apk build failed" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f build/gofile-url.txt ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "gofile: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"
+          fi

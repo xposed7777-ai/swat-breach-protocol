@@ -44,6 +44,7 @@ jobs:
           "$sdkmanager" "platform-tools" "platforms;${android_platform}" "build-tools;${android_build_tools}"
           test -x "$ANDROID_HOME/platform-tools/adb"
           "$ANDROID_HOME/platform-tools/adb" start-server
+          "$ANDROID_HOME/platform-tools/adb" version
 
       - name: install godot
         shell: bash
@@ -68,6 +69,15 @@ jobs:
           printf '%s\n' "${godot_version}.stable" > "$HOME/.local/share/godot/export_templates/${godot_version}.stable/version.txt"
           test -s "$HOME/.local/share/godot/export_templates/${godot_version}.stable/android_debug.apk"
 
+      - name: create debug keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ci
+          rm -f .ci/debug.keystore
+          keytool -genkeypair -v -keystore .ci/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          test -s .ci/debug.keystore
+
       - name: configure godot android editor settings
         shell: bash
         run: |
@@ -89,19 +99,10 @@ jobs:
           export/android/debug_keystore = "$GITHUB_WORKSPACE/.ci/debug.keystore"
           export/android/debug_keystore_user = "androiddebugkey"
           export/android/debug_keystore_pass = "android"
-          export/android/shutdown_adb_on_exit = true
+          export/android/shutdown_adb_on_exit = false
           export/android/force_system_user = false
           EOF
           cat "$HOME/.config/godot/editor_settings-4.tres"
-
-      - name: create debug keystore
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .ci
-          rm -f .ci/debug.keystore
-          keytool -genkeypair -v -keystore .ci/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          test -s .ci/debug.keystore
 
       - name: verify project
         shell: bash
@@ -128,6 +129,19 @@ jobs:
           set -euo pipefail
           ./godot-bin/godot --headless --path . --script res://scripts/gameplay_smoke_test.gd
 
+      - name: restart adb before android export
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="$android_home"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          adb_path="$ANDROID_HOME/platform-tools/adb"
+          test -x "$adb_path"
+          "$adb_path" kill-server || true
+          "$adb_path" start-server
+          "$adb_path" version
+          "$adb_path" devices
+
       - name: android export configuration test
         shell: bash
         run: |
@@ -137,7 +151,9 @@ jobs:
           export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$GITHUB_WORKSPACE/.ci/debug.keystore"
           export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
           export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
-          ./godot-bin/godot --headless --path . --editor --quit --import
+          adb_path="$ANDROID_HOME/platform-tools/adb"
+          "$adb_path" start-server
+          "$adb_path" devices
           ./godot-bin/godot --headless --path . --export-debug "Android" /tmp/swat-export-test.apk
           test -s /tmp/swat-export-test.apk
           file /tmp/swat-export-test.apk
@@ -153,6 +169,9 @@ jobs:
           export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$GITHUB_WORKSPACE/.ci/debug.keystore"
           export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
           export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
+          adb_path="$ANDROID_HOME/platform-tools/adb"
+          "$adb_path" start-server
+          "$adb_path" devices
           ./godot-bin/godot --headless --path . --export-debug "Android" build/swat-breach-protocol-debug.apk
           test -s build/swat-breach-protocol-debug.apk
           file build/swat-breach-protocol-debug.apk
@@ -187,4 +206,5 @@ jobs:
           if [ -f build/swat-breach-protocol-debug.apk ]; then echo "apk: built" >> "$GITHUB_STEP_SUMMARY"; else echo "apk: failed" >> "$GITHUB_STEP_SUMMARY"; fi
           if [ -f build/gofile-url.txt ]; then echo "gofile apk: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"; fi
           echo "gameplay smoke test: runs before android export" >> "$GITHUB_STEP_SUMMARY"
+          echo "adb: installed, validated, and kept running for android export" >> "$GITHUB_STEP_SUMMARY"
           echo "assets: remain on github artifacts; gofile receives apk only" >> "$GITHUB_STEP_SUMMARY"

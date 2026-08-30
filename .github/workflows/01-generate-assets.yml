@@ -1,0 +1,92 @@
+name: 01 - generate 3d assets
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BLENDER_VERSION: "4.2.3"
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: install blender
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y blender
+          blender --version
+
+      - name: generate assets
+        run: |
+          set -euo pipefail
+          mkdir -p generated
+          blender --background --python generator/blender/generate_assets.py
+          test -s generated/models/pistol_9mm.glb
+          test -s generated/models/carbine_556.glb
+          test -s generated/models/pump_shotgun.glb
+          test -s generated/maps/training_room.glb
+
+      - name: package assets
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          tar -czf build/swat-assets.tar.gz generated game
+          ls -lh build/swat-assets.tar.gz
+
+      - name: upload to catbox
+        id: catbox
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          url=$(curl --fail --silent --show-error \
+            -F 'reqtype=fileupload' \
+            -F 'fileToUpload=@build/swat-assets.tar.gz' \
+            https://catbox.moe/user/api.php)
+          test -n "$url"
+          printf '%s\n' "$url" > catbox-url.txt
+          echo "catbox_url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: upload to gofile
+        id: gofile
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          response=$(curl --fail --silent --show-error \
+            -X POST https://upload.gofile.io/uploadfile \
+            -F 'file=@build/swat-assets.tar.gz')
+          echo "$response" > gofile-response.json
+          url=$(python -c 'import json,sys; print(json.load(open("gofile-response.json"))["data"]["downloadPage"])')
+          test -n "$url"
+          printf '%s\n' "$url" > gofile-url.txt
+          echo "gofile_url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: publish asset source manifest
+        run: |
+          set -euo pipefail
+          mkdir -p generated
+          : > generated/asset-source.txt
+          if [ -s catbox-url.txt ]; then catbox=$(cat catbox-url.txt); echo "catbox=$catbox" >> generated/asset-source.txt; fi
+          if [ -s gofile-url.txt ]; then gofile=$(cat gofile-url.txt); echo "gofile=$gofile" >> generated/asset-source.txt; fi
+          test -s generated/asset-source.txt
+          cat generated/asset-source.txt
+
+      - name: commit asset manifest
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add generated/asset-source.txt
+          git diff --cached --quiet || git commit -m "publish generated asset manifest"
+          git push

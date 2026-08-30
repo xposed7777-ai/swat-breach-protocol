@@ -23,11 +23,13 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v4
+
       - name: setup java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
+
       - name: setup android sdk
         shell: bash
         run: |
@@ -42,6 +44,7 @@ jobs:
           test -d "$ANDROID_HOME/platforms/${ANDROID_PLATFORM}"
           test -d "$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}"
           test -x "$ANDROID_HOME/platform-tools/adb"
+
       - name: install godot
         run: |
           set -euo pipefail
@@ -50,6 +53,7 @@ jobs:
           mv "godot-bin/Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot-bin/godot
           chmod +x godot-bin/godot
           ./godot-bin/godot --version
+
       - name: install godot export templates
         run: |
           set -euo pipefail
@@ -61,22 +65,34 @@ jobs:
           find templates -type f -name 'android_source.zip' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_source.zip" \;
           printf '%s\n' "${GODOT_VERSION}.stable" > "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/version.txt"
           test -s "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_debug.apk"
+
       - name: configure godot android paths
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.config/godot"
           cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
-          [gd_resource type="EditorSettings" format=3]
+[gd_resource type="EditorSettings" format=3]
 
-          [resource]
-          export/android/android_sdk_path = "$ANDROID_HOME"
-          export/android/java_sdk_path = "$JAVA_HOME"
-          EOF
+[resource]
+export/android/android_sdk_path = "$ANDROID_HOME"
+export/android/java_sdk_path = "$JAVA_HOME"
+EOF
+
       - name: create debug keystore
         run: |
           set -euo pipefail
           mkdir -p .ci
-          keytool -genkeypair -v -keystore .ci/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          keytool -genkeypair -v \
+            -keystore .ci/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          test -s .ci/debug.keystore
+
       - name: verify project files
         run: |
           set -euo pipefail
@@ -85,8 +101,10 @@ jobs:
           test -f scenes/main.tscn
           test -f scripts/main.gd
           find assets -type f -print | sort
+
       - name: godot import and script validation
         run: ./godot-bin/godot --headless --path . --editor --quit --import
+
       - name: headless gameplay smoke test
         run: |
           set -euo pipefail
@@ -95,7 +113,12 @@ jobs:
           cat /tmp/godot-smoke.log
           if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then exit "$rc"; fi
           if grep -Eqi 'SCRIPT ERROR|PARSE ERROR|ERROR:.*script' /tmp/godot-smoke.log; then exit 1; fi
+
       - name: build android debug apk
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/.ci/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
         run: |
           set -euo pipefail
           mkdir -p build
@@ -103,6 +126,7 @@ jobs:
           test -s build/swat-breach-protocol-debug.apk
           file build/swat-breach-protocol-debug.apk
           ls -lh build/swat-breach-protocol-debug.apk
+
       - name: upload apk artifact
         uses: actions/upload-artifact@v4
         with:
@@ -110,20 +134,34 @@ jobs:
           path: build/swat-breach-protocol-debug.apk
           retention-days: 7
           compression-level: 0
+
       - name: upload apk to gofile
         id: gofile
         continue-on-error: true
         run: |
           set -euo pipefail
-          response=$(curl --fail --silent --show-error --location --retry 3 -X POST -F 'file=@build/swat-breach-protocol-debug.apk' https://upload.gofile.io/uploadfile)
+          response=$(curl --fail --silent --show-error --location --retry 3 \
+            -X POST \
+            -F 'file=@build/swat-breach-protocol-debug.apk' \
+            https://upload.gofile.io/uploadfile)
           echo "$response" | tee build/gofile-response.json
           url=$(python3 -c 'import json,sys; d=json.load(sys.stdin).get("data",{}); print(d.get("downloadPage") or d.get("directLink") or "")' <<< "$response")
-          if [ -z "$url" ]; then exit 1; fi
+          if [ -z "$url" ]; then
+            echo "gofile did not return a download url"
+            exit 1
+          fi
           printf '%s\n' "$url" > build/gofile-url.txt
           echo "gofile: $url"
+
       - name: publish build summary
         if: always()
         run: |
           echo "## swat: breach protocol" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f build/swat-breach-protocol-debug.apk ]; then echo "apk built successfully" >> "$GITHUB_STEP_SUMMARY"; else echo "apk build failed" >> "$GITHUB_STEP_SUMMARY"; fi
-          if [ -f build/gofile-url.txt ]; then echo "gofile: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f build/swat-breach-protocol-debug.apk ]; then
+            echo "apk built successfully" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "apk build failed" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f build/gofile-url.txt ]; then
+            echo "gofile: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"
+          fi

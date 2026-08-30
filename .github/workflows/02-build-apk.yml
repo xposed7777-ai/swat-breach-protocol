@@ -34,21 +34,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | sort | tail -n 1)
+          test -d "$android_home"
+          sdkmanager=$(find "$android_home/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | sort | tail -n 1)
           test -n "$sdkmanager"
           yes | "$sdkmanager" --licenses >/dev/null || true
-          "$sdkmanager" "platform-tools" "platforms;${ANDROID_PLATFORM}" "build-tools;${ANDROID_BUILD_TOOLS}"
-          test -d "$ANDROID_HOME/platforms/${ANDROID_PLATFORM}"
-          test -d "$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}"
-          test -x "$ANDROID_HOME/platform-tools/adb"
+          "$sdkmanager" "platform-tools" "platforms;${android_platform}" "build-tools;${android_build_tools}"
+          test -d "$android_home/platforms/${android_platform}"
+          test -d "$android_home/build-tools/${android_build_tools}"
+          test -x "$android_home/platform-tools/adb"
 
       - name: install godot
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 4 --retry-delay 3 -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl --fail --location --retry 4 --retry-delay 3 -o godot.zip "https://github.com/godotengine/godot/releases/download/${godot_version}-stable/Godot_v${godot_version}-stable_linux.x86_64.zip"
           unzip -q godot.zip -d godot-bin
-          mv "godot-bin/Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot-bin/godot
+          mv "godot-bin/Godot_v${godot_version}-stable_linux.x86_64" godot-bin/godot
           chmod +x godot-bin/godot
           ./godot-bin/godot --version
 
@@ -56,14 +57,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 4 --retry-delay 3 -o templates.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
-          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          curl --fail --location --retry 4 --retry-delay 3 -o templates.tpz "https://github.com/godotengine/godot/releases/download/${godot_version}-stable/Godot_v${godot_version}-stable_export_templates.tpz"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${godot_version}.stable"
           unzip -q templates.tpz -d templates
-          find templates -type f -name 'android_debug.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_debug.apk" \;
-          find templates -type f -name 'android_release.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_release.apk" \;
-          find templates -type f -name 'android_source.zip' -exec cp {} "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_source.zip" \;
-          printf '%s\n' "${GODOT_VERSION}.stable" > "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/version.txt"
-          test -s "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_debug.apk"
+          find templates -type f -name 'android_debug.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${godot_version}.stable/android_debug.apk" \;
+          find templates -type f -name 'android_release.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${godot_version}.stable/android_release.apk" \;
+          find templates -type f -name 'android_source.zip' -exec cp {} "$HOME/.local/share/godot/export_templates/${godot_version}.stable/android_source.zip" \;
+          printf '%s\n' "${godot_version}.stable" > "$HOME/.local/share/godot/export_templates/${godot_version}.stable/version.txt"
+          test -s "$HOME/.local/share/godot/export_templates/${godot_version}.stable/android_debug.apk"
 
       - name: create debug keystore
         shell: bash

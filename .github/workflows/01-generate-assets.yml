@@ -28,28 +28,16 @@ jobs:
           sudo apt-get install -y blender
           blender --version
 
-      - name: install blender numpy dependency
-        run: |
-          set -euo pipefail
-          blender --background --python-expr 'import ensurepip; ensurepip.bootstrap()'
-          BLENDER_PY=/usr/bin/4.0/python/bin/python3.12
-          if [ ! -x "$BLENDER_PY" ]; then
-            BLENDER_PY=$(find /usr -type f -path '*/4.0/python/bin/python3.12' 2>/dev/null | head -n 1)
-          fi
-          test -x "$BLENDER_PY"
-          "$BLENDER_PY" -m pip install --disable-pip-version-check --no-cache-dir numpy
-          "$BLENDER_PY" -c 'import numpy; print("numpy", numpy.__version__)'
-
       - name: generate assets
         run: |
           set -euo pipefail
           rm -rf generated
           mkdir -p generated
           blender --background --python generator/blender/generate_assets.py
-          test -s generated/models/pistol_9mm.glb
-          test -s generated/models/carbine_556.glb
-          test -s generated/models/pump_shotgun.glb
-          test -s generated/maps/training_room.glb
+          test -s generated/models/pistol_9mm.obj
+          test -s generated/models/carbine_556.obj
+          test -s generated/models/pump_shotgun.obj
+          test -s generated/maps/training_room.obj
 
       - name: validate generated files
         run: |

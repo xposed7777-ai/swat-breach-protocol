@@ -16,6 +16,8 @@ env:
   android_home: "/usr/local/lib/android/sdk"
   android_platform: "android-35"
   android_build_tools: "35.0.1"
+  android_cmake: "3.10.2.4988404"
+  android_ndk: "28.1.13356709"
 
 jobs:
   build:
@@ -41,8 +43,12 @@ jobs:
           sdkmanager="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | sort | tail -n 1)"
           test -n "$sdkmanager"
           yes | "$sdkmanager" --licenses >/dev/null || true
-          "$sdkmanager" "platform-tools" "platforms;${android_platform}" "build-tools;${android_build_tools}"
+          "$sdkmanager" "platform-tools" "platforms;${android_platform}" "build-tools;${android_build_tools}" "cmake;${android_cmake}" "ndk;${android_ndk}"
           test -x "$ANDROID_HOME/platform-tools/adb"
+          test -d "$ANDROID_HOME/platforms/${android_platform}"
+          test -d "$ANDROID_HOME/build-tools/${android_build_tools}"
+          test -d "$ANDROID_HOME/cmake/${android_cmake}"
+          test -d "$ANDROID_HOME/ndk/${android_ndk}"
           "$ANDROID_HOME/platform-tools/adb" start-server
           "$ANDROID_HOME/platform-tools/adb" version
 
@@ -61,13 +67,17 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --location --retry 4 --retry-delay 3 -o templates.tpz "https://github.com/godotengine/godot/releases/download/${godot_version}-stable/Godot_v${godot_version}-stable_export_templates.tpz"
-          mkdir -p "$HOME/.local/share/godot/export_templates/${godot_version}.stable"
+          template_dir="$HOME/.local/share/godot/export_templates/${godot_version}.stable"
+          rm -rf "$template_dir"
+          mkdir -p "$template_dir"
           unzip -q templates.tpz -d templates
-          find templates -type f -name 'android_debug.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${godot_version}.stable/android_debug.apk" \;
-          find templates -type f -name 'android_release.apk' -exec cp {} "$HOME/.local/share/godot/export_templates/${godot_version}.stable/android_release.apk" \;
-          find templates -type f -name 'android_source.zip' -exec cp {} "$HOME/.local/share/godot/export_templates/${godot_version}.stable/android_source.zip" \;
-          printf '%s\n' "${godot_version}.stable" > "$HOME/.local/share/godot/export_templates/${godot_version}.stable/version.txt"
-          test -s "$HOME/.local/share/godot/export_templates/${godot_version}.stable/android_debug.apk"
+          find templates -type f -name 'android_debug.apk' -exec cp {} "$template_dir/android_debug.apk" \;
+          find templates -type f -name 'android_release.apk' -exec cp {} "$template_dir/android_release.apk" \;
+          find templates -type f -name 'android_source.zip' -exec cp {} "$template_dir/android_source.zip" \;
+          printf '%s\n' "${godot_version}.stable" > "$template_dir/version.txt"
+          test -s "$template_dir/android_debug.apk"
+          test -s "$template_dir/android_release.apk"
+          test -s "$template_dir/android_source.zip"
 
       - name: create debug keystore
         shell: bash
@@ -86,22 +96,26 @@ jobs:
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
           test -n "${JAVA_HOME:-}"
           test -d "$JAVA_HOME"
-          test -d "$ANDROID_HOME"
           test -x "$ANDROID_HOME/platform-tools/adb"
+          test -d "$ANDROID_HOME/platforms/${android_platform}"
+          test -d "$ANDROID_HOME/build-tools/${android_build_tools}"
+          test -d "$ANDROID_HOME/cmake/${android_cmake}"
+          test -d "$ANDROID_HOME/ndk/${android_ndk}"
           mkdir -p "$HOME/.config/godot"
           cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
-          [gd_resource type="EditorSettings" format=3]
+[gd_resource type="EditorSettings" format=3]
 
-          [resource]
+[resource]
 
-          export/android/android_sdk_path = "$ANDROID_HOME"
-          export/android/java_sdk_path = "$JAVA_HOME"
-          export/android/debug_keystore = "$GITHUB_WORKSPACE/.ci/debug.keystore"
-          export/android/debug_keystore_user = "androiddebugkey"
-          export/android/debug_keystore_pass = "android"
-          export/android/shutdown_adb_on_exit = false
-          export/android/force_system_user = false
-          EOF
+export/android/android_sdk_path = "$ANDROID_HOME"
+export/android/java_sdk_path = "$JAVA_HOME"
+export/android/debug_keystore = "$GITHUB_WORKSPACE/.ci/debug.keystore"
+export/android/debug_keystore_user = "androiddebugkey"
+export/android/debug_keystore_pass = "android"
+export/android/shutdown_adb_on_exit = false
+export/android/force_system_user = false
+EOF
+          test -s "$HOME/.config/godot/editor_settings-4.tres"
           cat "$HOME/.config/godot/editor_settings-4.tres"
 
       - name: verify project
@@ -129,7 +143,7 @@ jobs:
           set -euo pipefail
           ./godot-bin/godot --headless --path . --script res://scripts/gameplay_smoke_test.gd
 
-      - name: restart adb before android export
+      - name: validate adb without requiring a device
         shell: bash
         run: |
           set -euo pipefail
@@ -140,7 +154,8 @@ jobs:
           "$adb_path" kill-server || true
           "$adb_path" start-server
           "$adb_path" version
-          "$adb_path" devices
+          "$adb_path" devices || true
+          echo "adb is installed and operational; no physical/emulated device is required on github actions"
 
       - name: android export configuration test
         shell: bash
@@ -151,9 +166,9 @@ jobs:
           export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$GITHUB_WORKSPACE/.ci/debug.keystore"
           export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
           export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
-          adb_path="$ANDROID_HOME/platform-tools/adb"
-          "$adb_path" start-server
-          "$adb_path" devices
+          mkdir -p build
+          rm -f /tmp/swat-export-test.apk
+          ./godot-bin/godot --headless --path . --editor --quit --import
           ./godot-bin/godot --headless --path . --export-debug "Android" /tmp/swat-export-test.apk
           test -s /tmp/swat-export-test.apk
           file /tmp/swat-export-test.apk
@@ -169,9 +184,6 @@ jobs:
           export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$GITHUB_WORKSPACE/.ci/debug.keystore"
           export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
           export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
-          adb_path="$ANDROID_HOME/platform-tools/adb"
-          "$adb_path" start-server
-          "$adb_path" devices
           ./godot-bin/godot --headless --path . --export-debug "Android" build/swat-breach-protocol-debug.apk
           test -s build/swat-breach-protocol-debug.apk
           file build/swat-breach-protocol-debug.apk
@@ -205,6 +217,6 @@ jobs:
           echo "## swat: breach protocol" >> "$GITHUB_STEP_SUMMARY"
           if [ -f build/swat-breach-protocol-debug.apk ]; then echo "apk: built" >> "$GITHUB_STEP_SUMMARY"; else echo "apk: failed" >> "$GITHUB_STEP_SUMMARY"; fi
           if [ -f build/gofile-url.txt ]; then echo "gofile apk: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"; fi
-          echo "gameplay smoke test: runs before android export" >> "$GITHUB_STEP_SUMMARY"
-          echo "adb: installed, validated, and kept running for android export" >> "$GITHUB_STEP_SUMMARY"
-          echo "assets: remain on github artifacts; gofile receives apk only" >> "$GITHUB_STEP_SUMMARY"
+          echo "gameplay smoke test: npc, hud/gui, fire, reload, aim, weapon switch" >> "$GITHUB_STEP_SUMMARY"
+          echo "adb: installed and validated; no device required" >> "$GITHUB_STEP_SUMMARY"
+          echo "assets: remain in github repository/artifacts; gofile receives apk only" >> "$GITHUB_STEP_SUMMARY"

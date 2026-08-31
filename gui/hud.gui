@@ -1,0 +1,45 @@
+script: "/gui/hud.gui_script"
+nodes {
+  type: TYPE_TEXT
+  id: "status"
+  position {
+    x: 80.0
+    y: 660.0
+    z: 1.0
+  }
+  size {
+    x: 600.0
+    y: 80.0
+    z: 0.0
+  }
+  text: "SWAT BREACH PROTOCOL | READY"
+  font: "/builtins/fonts/system_font.font"
+  color {
+    x: 1.0
+    y: 1.0
+    z: 1.0
+    w: 1.0
+  }
+}
+nodes {
+  type: TYPE_TEXT
+  id: "ammo"
+  position {
+    x: 1060.0
+    y: 80.0
+    z: 1.0
+  }
+  size {
+    x: 180.0
+    y: 80.0
+    z: 0.0
+  }
+  text: "AMMO 30/120"
+  font: "/builtins/fonts/system_font.font"
+  color {
+    x: 1.0
+    y: 1.0
+    z: 1.0
+    w: 1.0
+  }
+}

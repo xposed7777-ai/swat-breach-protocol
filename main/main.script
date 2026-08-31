@@ -1,14 +1,12 @@
 local state = {
     npc = { alive = true, health = 100 },
     hud = { ready = true },
-    weapon = { ammo = 30, reserve = 120, mag = 30, aiming = false, fire_count = 0, reloads = 0 },
+    weapon = { name = "carbine", ammo = 30, reserve = 120, mag = 30, aiming = false, fire_count = 0, reloads = 0 },
     tests = 0
 }
 
 local function check(condition, name)
-    if not condition then
-        error("GAMEPLAY SMOKE TEST FAILED: " .. name)
-    end
+    if not condition then error("GAMEPLAY SMOKE TEST FAILED: " .. name) end
     state.tests = state.tests + 1
 end
 
@@ -29,6 +27,10 @@ local function reload()
     state.weapon.reloads = state.weapon.reloads + 1
 end
 
+local function switch_weapon(name)
+    state.weapon.name = name
+end
+
 local function run_smoke_test()
     check(state.npc.alive, "npc initialization")
     check(state.hud.ready, "hud/gui initialization")
@@ -46,6 +48,9 @@ local function run_smoke_test()
     check(state.weapon.ammo == 30, "reload")
     check(state.weapon.reloads == 1, "reload event")
 
+    switch_weapon("pistol")
+    check(state.weapon.name == "pistol", "weapon switch")
+
     state.weapon.aiming = false
     check(not state.weapon.aiming, "aim release")
 
@@ -57,5 +62,4 @@ function init(self)
 end
 
 function update(self, dt)
-    -- gameplay systems are intentionally deterministic for CI verification
 end

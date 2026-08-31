@@ -4,20 +4,15 @@ on:
   workflow_run:
     workflows:
       - "01 - generate 3d assets"
-    types:
-      - completed
+    types: [completed]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  godot_version: "4.4.1"
-  android_home: "/usr/local/lib/android/sdk"
   android_platform: "android-35"
   android_build_tools: "35.0.1"
-  android_cmake: "3.10.2.4988404"
-  android_ndk: "28.1.13356709"
 
 jobs:
   build:
@@ -27,164 +22,104 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
-      - name: setup java
+      - name: setup java 25
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "25"
 
       - name: setup android sdk
-        shell: bash
-        run: |
-          set -euo pipefail
-          export ANDROID_HOME="$android_home"
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          test -d "$ANDROID_HOME"
-          sdkmanager="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -u+x 2>/dev/null | sort | tail -n 1)"
-          test -n "$sdkmanager"
-          yes | "$sdkmanager" --licenses >/dev/null || true
-          "$sdkmanager" "platform-tools" "platforms;${android_platform}" "build-tools;${android_build_tools}" "cmake;${android_cmake}" "ndk;${android_ndk}"
-          test -x "$ANDROID_HOME/platform-tools/adb"
-          test -d "$ANDROID_HOME/platforms/${android_platform}"
-          test -d "$ANDROID_HOME/build-tools/${android_build_tools}"
-          test -d "$ANDROID_HOME/cmake/${android_cmake}"
-          test -d "$ANDROID_HOME/ndk/${android_ndk}"
-          "$ANDROID_HOME/platform-tools/adb" start-server
-          "$ANDROID_HOME/platform-tools/adb" version
+        uses: android-actions/setup-android@v3
 
-      - name: install godot
+      - name: install android build tools
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 4 --retry-delay 3 -o godot.zip "https://github.com/godotengine/godot/releases/download/${godot_version}-stable/Godot_v${godot_version}-stable_linux.x86_64.zip"
-          unzip -q godot.zip -d godot-bin
-          mv "godot-bin/Godot_v${godot_version}-stable_linux.x86_64" godot-bin/godot
-          chmod +x godot-bin/godot
-          ./godot-bin/godot --version
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;${android_platform}" "build-tools;${android_build_tools}"
+          sdkmanager --list_installed | grep -E "platform-tools|platforms;${android_platform}|build-tools;${android_build_tools}" || true
 
-      - name: install godot export templates
+      - name: download defold bob
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 4 --retry-delay 3 -o templates.tpz "https://github.com/godotengine/godot/releases/download/${godot_version}-stable/Godot_v${godot_version}-stable_export_templates.tpz"
-          template_dir="$HOME/.local/share/godot/export_templates/${godot_version}.stable"
-          rm -rf "$template_dir"
-          mkdir -p "$template_dir"
-          unzip -q templates.tpz -d templates
-          find templates -type f -name 'android_debug.apk' -exec cp {} "$template_dir/android_debug.apk" \;
-          find templates -type f -name 'android_release.apk' -exec cp {} "$template_dir/android_release.apk" \;
-          find templates -type f -name 'android_source.zip' -exec cp {} "$template_dir/android_source.zip" \;
-          printf '%s\n' "${godot_version}.stable" > "$template_dir/version.txt"
-          test -s "$template_dir/android_debug.apk"
-          test -s "$template_dir/android_release.apk"
-          test -s "$template_dir/android_source.zip"
+          mkdir -p .defold
+          sha="$(curl --fail --silent --show-error --location https://d.defold.com/stable/info.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha1"])')"
+          test -n "$sha"
+          curl --fail --location --retry 4 --retry-delay 3 -o .defold/bob.jar "https://d.defold.com/archive/${sha}/bob/bob.jar"
+          test -s .defold/bob.jar
+          java -jar .defold/bob.jar --version
+
+      - name: verify defold project
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f game.project
+          test -f main/main.collection
+          test -f main/main.go
+          test -f main/main.script
+          test -f gui/hud.gui
+          test -f gui/hud.gui_script
+          test -d assets
+          ! find . -maxdepth 2 -type f \( -name 'project.godot' -o -name 'export_presets.cfg' \) | grep -q .
+
+      - name: gameplay smoke test build
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/smoke
+          mkdir -p build/smoke
+          java -jar .defold/bob.jar \
+            --root . \
+            --platform x86_64-linux \
+            --variant headless \
+            --archive \
+            --bundle-output build/smoke \
+            resolve build bundle
+          exe="$(find build/smoke -type f -executable | head -n 1)"
+          test -n "$exe"
+          timeout 10s "$exe" > build/smoke/gameplay.log 2>&1 || status=$?
+          status=${status:-0}
+          cat build/smoke/gameplay.log
+          grep -F "gameplay smoke test: PASS — npc, hud/gui, fire, reload, aim, weapon switch" build/smoke/gameplay.log
+          test "$status" -eq 0 || test "$status" -eq 124
 
       - name: create debug keystore
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .ci
-          rm -f .ci/debug.keystore
-          keytool -genkeypair -v -keystore .ci/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          test -s .ci/debug.keystore
-
-      - name: configure godot android editor settings
-        shell: bash
-        run: |
-          set -euo pipefail
-          export ANDROID_HOME="$android_home"
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          test -n "${JAVA_HOME:-}"
-          test -d "$JAVA_HOME"
-          test -x "$ANDROID_HOME/platform-tools/adb"
-          test -d "$ANDROID_HOME/platforms/${android_platform}"
-          test -d "$ANDROID_HOME/build-tools/${android_build_tools}"
-          test -d "$ANDROID_HOME/cmake/${android_cmake}"
-          test -d "$ANDROID_HOME/ndk/${android_ndk}"
-          mkdir -p "$HOME/.config/godot"
-          printf '%s\n' \
-            '[gd_resource type="EditorSettings" format=3]' \
-            '' \
-            '[resource]' \
-            '' \
-            "export/android/android_sdk_path = \"$ANDROID_HOME\"" \
-            "export/android/java_sdk_path = \"$JAVA_HOME\"" \
-            "export/android/debug_keystore = \"$GITHUB_WORKSPACE/.ci/debug.keystore\"" \
-            'export/android/debug_keystore_user = "androiddebugkey"' \
-            'export/android/debug_keystore_pass = "android"' \
-            'export/android/shutdown_adb_on_exit = false' \
-            'export/android/force_system_user = false' \
-            > "$HOME/.config/godot/editor_settings-4.tres"
-          test -s "$HOME/.config/godot/editor_settings-4.tres"
-          cat "$HOME/.config/godot/editor_settings-4.tres"
-
-      - name: verify project
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f project.godot
-          test -f export_presets.cfg
-          test -f scenes/main.tscn
-          test -f scripts/main.gd
-          test -f scripts/gameplay_smoke_test.gd
-          test -d assets
-
-      - name: import project
-        shell: bash
-        run: |
-          set -euo pipefail
-          export ANDROID_HOME="$android_home"
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          ./godot-bin/godot --headless --path . --editor --quit --import
-
-      - name: gameplay smoke test
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./godot-bin/godot --headless --path . --script res://scripts/gameplay_smoke_test.gd
-
-      - name: validate adb without requiring a device
-        shell: bash
-        run: |
-          set -euo pipefail
-          export ANDROID_HOME="$android_home"
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          adb_path="$ANDROID_HOME/platform-tools/adb"
-          test -x "$adb_path"
-          "$adb_path" kill-server || true
-          "$adb_path" start-server
-          "$adb_path" version
-          "$adb_path" devices || true
-          echo "adb is installed and operational; no physical/emulated device is required on github actions"
-
-      - name: android export configuration test
-        shell: bash
-        run: |
-          set -euo pipefail
-          export ANDROID_HOME="$android_home"
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$GITHUB_WORKSPACE/.ci/debug.keystore"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
-          mkdir -p build
-          rm -f /tmp/swat-export-test.apk
-          ./godot-bin/godot --headless --path . --editor --quit --import
-          ./godot-bin/godot --headless --path . --export-debug "Android" /tmp/swat-export-test.apk
-          test -s /tmp/swat-export-test.apk
-          file /tmp/swat-export-test.apk
+          keytool -genkeypair -v -noprompt \
+            -keystore .defold/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          printf '%s' android > .defold/debug.keystore.pass.txt
 
       - name: build android debug apk
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build
-          rm -f build/swat-breach-protocol-debug.apk
-          export ANDROID_HOME="$android_home"
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$GITHUB_WORKSPACE/.ci/debug.keystore"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
-          ./godot-bin/godot --headless --path . --export-debug "Android" build/swat-breach-protocol-debug.apk
+          rm -rf build/android
+          mkdir -p build/android
+          java -jar .defold/bob.jar \
+            --root . \
+            --platform arm64-android \
+            --architectures arm64-android \
+            --variant debug \
+            --bundle-format apk \
+            --archive \
+            --bundle-output build/android \
+            --keystore .defold/debug.keystore \
+            --keystore-alias androiddebugkey \
+            --keystore-pass android \
+            resolve build bundle
+          apk="$(find build/android -type f -name '*.apk' | head -n 1)"
+          test -n "$apk"
+          cp "$apk" build/swat-breach-protocol-debug.apk
           test -s build/swat-breach-protocol-debug.apk
           file build/swat-breach-protocol-debug.apk
           ls -lh build/swat-breach-protocol-debug.apk
@@ -198,25 +133,25 @@ jobs:
           compression-level: 0
 
       - name: upload apk to gofile
-        id: gofile
-        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error --location --retry 3 -X POST -F 'file=@build/swat-breach-protocol-debug.apk' https://upload.gofile.io/uploadfile)"
+          response="$(curl --fail --silent --show-error --location --retry 3 \
+            -X POST \
+            -F 'file=@build/swat-breach-protocol-debug.apk' \
+            https://upload.gofile.io/uploadfile)"
           printf '%s\n' "$response" > build/gofile-response.json
           url="$(python3 -c 'import json,sys; d=json.load(sys.stdin).get("data",{}); print(d.get("downloadPage") or d.get("directLink") or "")' <<< "$response")"
           test -n "$url"
           printf '%s\n' "$url" > build/gofile-url.txt
           echo "gofile: $url"
 
-      - name: build summary
+      - name: summary
         if: always()
         shell: bash
         run: |
-          echo "## swat: breach protocol" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f build/swat-breach-protocol-debug.apk ]; then echo "apk: built" >> "$GITHUB_STEP_SUMMARY"; else echo "apk: failed" >> "$GITHUB_STEP_SUMMARY"; fi
-          if [ -f build/gofile-url.txt ]; then echo "gofile apk: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"; fi
+          echo "## swat: breach protocol — defold" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s build/swat-breach-protocol-debug.apk ]; then echo "apk: PASS" >> "$GITHUB_STEP_SUMMARY"; else echo "apk: FAIL" >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -s build/gofile-url.txt ]; then echo "gofile: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"; fi
           echo "gameplay smoke test: npc, hud/gui, fire, reload, aim, weapon switch" >> "$GITHUB_STEP_SUMMARY"
-          echo "adb: installed and validated; no device required" >> "$GITHUB_STEP_SUMMARY"
-          echo "assets: remain in github repository/artifacts; gofile receives apk only" >> "$GITHUB_STEP_SUMMARY"
+          echo "gofile receives APK only; game assets stay in the repository/build" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,22 @@
+[project]
+title = Swat Breach Protocol
+version = 0.1.0
+bootstrap.main_collection = /main/main.collection
+
+[display]
+width = 1280
+height = 720
+high_dpi = 1
+
+[android]
+package = com.xposed7777.swatbreachprotocol
+version_code = 1
+version_name = 0.1.0
+immersive_mode = 1
+debuggable = 1
+
+[input]
+use_accelerometer = 0
+
+[graphics]
+clear_color = 0.03 0.03 0.03 1

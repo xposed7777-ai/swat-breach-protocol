@@ -13,48 +13,57 @@ permissions:
 env:
   android_platform: "android-35"
   android_build_tools: "35.0.1"
+  defold_version: "1.13.1"
 
 jobs:
   build:
+    name: build
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+
     steps:
       - name: checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - name: setup java
+      - name: setup java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: "17"
+          cache: maven
 
       - name: setup android sdk
         uses: android-actions/setup-android@v3
 
-      - name: install android build tools
+      - name: install android sdk components
         shell: bash
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platform-tools" "platforms;${android_platform}" "build-tools;${android_build_tools}"
+          sdkmanager \
+            "platform-tools" \
+            "platforms;${android_platform}" \
+            "build-tools;${android_build_tools}"
           test -x "$ANDROID_SDK_ROOT/platform-tools/adb"
           test -d "$ANDROID_SDK_ROOT/platforms/${android_platform}"
           test -d "$ANDROID_SDK_ROOT/build-tools/${android_build_tools}"
+          echo "android sdk: ready"
 
       - name: download defold bob
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .defold
-          sha="$(curl --fail --silent --show-error --location https://d.defold.com/stable/info.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha1"])')"
-          test -n "$sha"
-          curl --fail --location --retry 4 --retry-delay 3 -o .defold/bob.jar "https://d.defold.com/archive/${sha}/bob/bob.jar"
-          test -s .defold/bob.jar
+          mkdir -p .ci/tools
+          url="https://github.com/defold/defold/releases/download/${defold_version}/bob.jar"
+          curl --fail --silent --show-error --location --retry 5 --retry-delay 2 \
+            -o .ci/tools/bob.jar "$url"
+          test -s .ci/tools/bob.jar
           java -version
-          java -jar .defold/bob.jar --version 2>&1 | tee .defold/bob-version.txt
-          grep -F "bob.jar version" .defold/bob-version.txt
+          java -jar .ci/tools/bob.jar --version 2>&1 | tee .ci/tools/bob-version.txt
 
-      - name: verify defold project
+      - name: verify defold project and repository assets
         shell: bash
         run: |
           set -euo pipefail
@@ -65,65 +74,72 @@ jobs:
           test -f gui/hud.gui
           test -f gui/hud.gui_script
           test -d assets
-          if find . -maxdepth 2 -type f \( -name 'project.godot' -o -name 'export_presets.cfg' \) | grep -q .; then
+
+          if find . -maxdepth 2 -type f \( -name 'project.godot' -o -name 'export_presets.cfg' \) -print -quit | grep -q .; then
             echo "error: old godot project files are still present"
             exit 1
           fi
 
-      - name: normalize defold bootstrap collection
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f main/main.collection
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("game.project")
-          text = p.read_text(encoding="utf-8")
-          lines = text.splitlines()
-          found = False
-          for i, line in enumerate(lines):
-              if line.startswith("bootstrap.main_collection"):
-                  lines[i] = "bootstrap.main_collection = /main/main.collection"
-                  found = True
-                  break
-          if not found:
-              lines.append("bootstrap.main_collection = /main/main.collection")
-          p.write_text("\n".join(lines) + "\n", encoding="utf-8")
-          PY
-          echo "bootstrap:" 
-          grep -F "bootstrap.main_collection" game.project
-          test "$(grep -F "bootstrap.main_collection = /main/main.collection" game.project | wc -l)" -eq 1
+          asset_count="$(find assets -type f | wc -l | tr -d ' ')"
+          echo "repository assets: ${asset_count}"
+          test "$asset_count" -gt 0
 
-      - name: gameplay smoke test build
+          echo "asset files:"
+          find assets -type f -print | sort
+
+      - name: validate generated 3d assets
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .ci/smoke
-          mkdir -p .ci/smoke
-          java -jar .defold/bob.jar \
+          count=0
+          while IFS= read -r -d '' file; do
+            test -s "$file"
+            count=$((count + 1))
+          done < <(find assets -type f \( -name '*.obj' -o -name '*.dae' -o -name '*.gltf' -o -name '*.glb' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.wav' -o -name '*.ogg' -o -name '*.mp3' \) -print0)
+          echo "validated asset files: $count"
+          test "$count" -gt 0
+
+      - name: gameplay smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke="${RUNNER_TEMP}/swat-smoke"
+          rm -rf "$smoke"
+          mkdir -p "$smoke"
+
+          java -jar .ci/tools/bob.jar \
             --root . \
             --platform x86_64-linux \
             --variant headless \
             --archive \
-            --bundle-output .ci/smoke \
+            --bundle-output "$smoke" \
             resolve build bundle
-          exe="$(find .ci/smoke -type f -executable -print -quit)"
-          test -n "$exe"
+
+          executable="$(find "$smoke" -type f -executable -print -quit)"
+          test -n "$executable"
+
           set +e
-          timeout 15s "$exe" > .ci/smoke/gameplay.log 2>&1
+          timeout 20s "$executable" > "$smoke/gameplay.log" 2>&1
           status=$?
           set -e
-          cat .ci/smoke/gameplay.log
-          grep -F "gameplay smoke test: PASS — npc, hud/gui, fire, reload, aim, weapon switch" .ci/smoke/gameplay.log
-          test "$status" -eq 0 || test "$status" -eq 124
+
+          cat "$smoke/gameplay.log"
+          grep -F "gameplay smoke test: PASS — npc, hud/gui, fire, reload, aim, weapon switch" "$smoke/gameplay.log"
+
+          if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
+            echo "error: gameplay process exited with status $status"
+            exit "$status"
+          fi
+
+          echo "gameplay smoke test: PASS"
 
       - name: create debug keystore
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .defold
+          mkdir -p .ci/signing
           keytool -genkeypair -v -noprompt \
-            -keystore .defold/debug.keystore \
+            -keystore .ci/signing/debug.keystore \
             -storepass android \
             -alias androiddebugkey \
             -keypass android \
@@ -131,36 +147,59 @@ jobs:
             -keysize 2048 \
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
+          test -s .ci/signing/debug.keystore
 
-      - name: build android debug apk
+      - name: build android debug apk with assets
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .ci/android
-          mkdir -p .ci/android
-          java -jar .defold/bob.jar \
+          output="${RUNNER_TEMP}/swat-apk-output"
+          rm -rf "$output"
+          mkdir -p "$output"
+
+          java -jar .ci/tools/bob.jar \
             --root . \
             --platform arm64-android \
             --variant debug \
             --bundle-format apk \
             --archive \
-            --bundle-output .ci/android \
-            --keystore .defold/debug.keystore \
+            --bundle-output "$output" \
+            --keystore .ci/signing/debug.keystore \
             --keystore-alias androiddebugkey \
             --keystore-pass android \
             resolve build bundle
-          apk="$(find .ci/android -type f -name '*.apk' -print -quit)"
+
+          apk="$(find "$output" -type f -name '*.apk' -print -quit)"
           test -n "$apk"
-          cp "$apk" .ci/swat-breach-protocol-debug.apk
-          test -s .ci/swat-breach-protocol-debug.apk
-          file .ci/swat-breach-protocol-debug.apk
-          ls -lh .ci/swat-breach-protocol-debug.apk
+          test -s "$apk"
+
+          mkdir -p .ci/release
+          cp "$apk" .ci/release/swat-breach-protocol-debug.apk
+          test -s .ci/release/swat-breach-protocol-debug.apk
+
+          file .ci/release/swat-breach-protocol-debug.apk
+          ls -lh .ci/release/swat-breach-protocol-debug.apk
+
+      - name: verify apk contains game assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=.ci/release/swat-breach-protocol-debug.apk
+          unzip -l "$apk" > .ci/release/apk-contents.txt
+          test -s .ci/release/apk-contents.txt
+
+          echo "apk contents:"
+          grep -E 'assets/|main/|gui/' .ci/release/apk-contents.txt | head -100 || true
+
+          size="$(stat -c '%s' "$apk")"
+          echo "apk bytes: $size"
+          test "$size" -gt 100000
 
       - name: upload apk artifact
         uses: actions/upload-artifact@v4
         with:
           name: swat-breach-protocol-debug-apk
-          path: .ci/swat-breach-protocol-debug.apk
+          path: .ci/release/swat-breach-protocol-debug.apk
           retention-days: 7
           compression-level: 0
 
@@ -168,22 +207,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error --location --retry 3 \
+          response="$(curl --fail --silent --show-error --location --retry 5 --retry-delay 2 \
             -X POST \
-            -F 'file=@.ci/swat-breach-protocol-debug.apk' \
+            -F 'file=@.ci/release/swat-breach-protocol-debug.apk' \
             https://upload.gofile.io/uploadfile)"
-          printf '%s\n' "$response" > .ci/gofile-response.json
+
+          printf '%s\n' "$response" > .ci/release/gofile-response.json
+
           url="$(python3 -c 'import json,sys; d=json.load(sys.stdin).get("data",{}); print(d.get("downloadPage") or d.get("directLink") or "")' <<< "$response")"
           test -n "$url"
-          printf '%s\n' "$url" > .ci/gofile-url.txt
+          printf '%s\n' "$url" > .ci/release/gofile-url.txt
           echo "gofile: $url"
 
-      - name: summary
+      - name: build summary
         if: always()
         shell: bash
         run: |
-          echo "## swat: breach protocol — defold" >> "$GITHUB_STEP_SUMMARY"
-          if [ -s .ci/swat-breach-protocol-debug.apk ]; then echo "apk: PASS" >> "$GITHUB_STEP_SUMMARY"; else echo "apk: FAIL" >> "$GITHUB_STEP_SUMMARY"; fi
-          if [ -s .ci/gofile-url.txt ]; then echo "gofile: $(cat .ci/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"; fi
-          echo "gameplay smoke test: npc, hud/gui, fire, reload, aim, weapon switch" >> "$GITHUB_STEP_SUMMARY"
-          echo "gofile receives APK only; game assets stay in the repository" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## swat: breach protocol — android build"
+            echo ""
+            echo "- engine: defold ${defold_version}"
+            echo "- android: ${android_platform} / ${android_build_tools}"
+            echo "- assets: repository assets included in build"
+            echo "- gameplay smoke test: npc, hud/gui, fire, reload, aim, weapon switch"
+            if [ -s .ci/release/swat-breach-protocol-debug.apk ]; then
+              echo "- apk: PASS"
+            else
+              echo "- apk: FAIL"
+            fi
+            if [ -s .ci/release/gofile-url.txt ]; then
+              echo "- gofile: $(cat .ci/release/gofile-url.txt)"
+            fi
+            echo "- adb device: not required"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -26,7 +26,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "25"
 
       - name: setup android sdk
         uses: android-actions/setup-android@v3
@@ -50,7 +50,8 @@ jobs:
           test -n "$sha"
           curl --fail --location --retry 4 --retry-delay 3 -o .defold/bob.jar "https://d.defold.com/archive/${sha}/bob/bob.jar"
           test -s .defold/bob.jar
-          java -jar .defold/bob.jar --version 2>&1 | tee .defold/bob-version.txt || true
+          java -version
+          java -jar .defold/bob.jar --version 2>&1 | tee .defold/bob-version.txt
           grep -F "bob.jar version" .defold/bob-version.txt
 
       - name: verify defold project

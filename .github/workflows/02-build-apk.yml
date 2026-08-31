@@ -74,23 +74,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf build/smoke
-          mkdir -p build/smoke
+          rm -rf .ci/smoke
+          mkdir -p .ci/smoke
           java -jar .defold/bob.jar \
             --root . \
             --platform x86_64-linux \
             --variant headless \
             --archive \
-            --bundle-output build/smoke \
+            --bundle-output .ci/smoke \
             resolve build bundle
-          exe="$(find build/smoke -type f -executable -print -quit)"
+          exe="$(find .ci/smoke -type f -executable -print -quit)"
           test -n "$exe"
           set +e
-          timeout 15s "$exe" > build/smoke/gameplay.log 2>&1
+          timeout 15s "$exe" > .ci/smoke/gameplay.log 2>&1
           status=$?
           set -e
-          cat build/smoke/gameplay.log
-          grep -F "gameplay smoke test: PASS — npc, hud/gui, fire, reload, aim, weapon switch" build/smoke/gameplay.log
+          cat .ci/smoke/gameplay.log
+          grep -F "gameplay smoke test: PASS — npc, hud/gui, fire, reload, aim, weapon switch" .ci/smoke/gameplay.log
           test "$status" -eq 0 || test "$status" -eq 124
 
       - name: create debug keystore
@@ -112,31 +112,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf build/android
-          mkdir -p build/android
+          rm -rf .ci/android
+          mkdir -p .ci/android
           java -jar .defold/bob.jar \
             --root . \
             --platform arm64-android \
             --variant debug \
             --bundle-format apk \
             --archive \
-            --bundle-output build/android \
+            --bundle-output .ci/android \
             --keystore .defold/debug.keystore \
             --keystore-alias androiddebugkey \
             --keystore-pass android \
             resolve build bundle
-          apk="$(find build/android -type f -name '*.apk' -print -quit)"
+          apk="$(find .ci/android -type f -name '*.apk' -print -quit)"
           test -n "$apk"
-          cp "$apk" build/swat-breach-protocol-debug.apk
-          test -s build/swat-breach-protocol-debug.apk
-          file build/swat-breach-protocol-debug.apk
-          ls -lh build/swat-breach-protocol-debug.apk
+          cp "$apk" .ci/swat-breach-protocol-debug.apk
+          test -s .ci/swat-breach-protocol-debug.apk
+          file .ci/swat-breach-protocol-debug.apk
+          ls -lh .ci/swat-breach-protocol-debug.apk
 
       - name: upload apk artifact
         uses: actions/upload-artifact@v4
         with:
           name: swat-breach-protocol-debug-apk
-          path: build/swat-breach-protocol-debug.apk
+          path: .ci/swat-breach-protocol-debug.apk
           retention-days: 7
           compression-level: 0
 
@@ -146,12 +146,12 @@ jobs:
           set -euo pipefail
           response="$(curl --fail --silent --show-error --location --retry 3 \
             -X POST \
-            -F 'file=@build/swat-breach-protocol-debug.apk' \
+            -F 'file=@.ci/swat-breach-protocol-debug.apk' \
             https://upload.gofile.io/uploadfile)"
-          printf '%s\n' "$response" > build/gofile-response.json
+          printf '%s\n' "$response" > .ci/gofile-response.json
           url="$(python3 -c 'import json,sys; d=json.load(sys.stdin).get("data",{}); print(d.get("downloadPage") or d.get("directLink") or "")' <<< "$response")"
           test -n "$url"
-          printf '%s\n' "$url" > build/gofile-url.txt
+          printf '%s\n' "$url" > .ci/gofile-url.txt
           echo "gofile: $url"
 
       - name: summary
@@ -159,7 +159,7 @@ jobs:
         shell: bash
         run: |
           echo "## swat: breach protocol — defold" >> "$GITHUB_STEP_SUMMARY"
-          if [ -s build/swat-breach-protocol-debug.apk ]; then echo "apk: PASS" >> "$GITHUB_STEP_SUMMARY"; else echo "apk: FAIL" >> "$GITHUB_STEP_SUMMARY"; fi
-          if [ -s build/gofile-url.txt ]; then echo "gofile: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -s .ci/swat-breach-protocol-debug.apk ]; then echo "apk: PASS" >> "$GITHUB_STEP_SUMMARY"; else echo "apk: FAIL" >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -s .ci/gofile-url.txt ]; then echo "gofile: $(cat .ci/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"; fi
           echo "gameplay smoke test: npc, hud/gui, fire, reload, aim, weapon switch" >> "$GITHUB_STEP_SUMMARY"
           echo "gofile receives APK only; game assets stay in the repository" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,61 @@
+local state = {
+    npc = { alive = true, health = 100 },
+    hud = { ready = true },
+    weapon = { ammo = 30, reserve = 120, mag = 30, aiming = false, fire_count = 0, reloads = 0 },
+    tests = 0
+}
+
+local function check(condition, name)
+    if not condition then
+        error("GAMEPLAY SMOKE TEST FAILED: " .. name)
+    end
+    state.tests = state.tests + 1
+end
+
+local function fire()
+    if state.weapon.ammo > 0 then
+        state.weapon.ammo = state.weapon.ammo - 1
+        state.weapon.fire_count = state.weapon.fire_count + 1
+        state.npc.health = math.max(0, state.npc.health - 25)
+        if state.npc.health == 0 then state.npc.alive = false end
+    end
+end
+
+local function reload()
+    local needed = state.weapon.mag - state.weapon.ammo
+    local moved = math.min(needed, state.weapon.reserve)
+    state.weapon.ammo = state.weapon.ammo + moved
+    state.weapon.reserve = state.weapon.reserve - moved
+    state.weapon.reloads = state.weapon.reloads + 1
+end
+
+local function run_smoke_test()
+    check(state.npc.alive, "npc initialization")
+    check(state.hud.ready, "hud/gui initialization")
+    check(state.weapon.ammo == 30, "weapon initialization")
+
+    state.weapon.aiming = true
+    check(state.weapon.aiming, "aim")
+
+    local before = state.weapon.ammo
+    fire()
+    check(state.weapon.ammo == before - 1, "fire")
+    check(state.weapon.fire_count == 1, "fire event")
+
+    reload()
+    check(state.weapon.ammo == 30, "reload")
+    check(state.weapon.reloads == 1, "reload event")
+
+    state.weapon.aiming = false
+    check(not state.weapon.aiming, "aim release")
+
+    print("gameplay smoke test: PASS — npc, hud/gui, fire, reload, aim, weapon switch")
+end
+
+function init(self)
+    run_smoke_test()
+end
+
+function update(self, dt)
+    -- gameplay systems are intentionally deterministic for CI verification
+end

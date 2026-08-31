@@ -1,0 +1,10 @@
+name: "main"
+instances {
+  id: "game"
+  prototype: "/main/main.go"
+  position {
+    x: 0.0
+    y: 0.0
+    z: 0.0
+  }
+}

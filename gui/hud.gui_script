@@ -1,0 +1,14 @@
+local M = {}
+
+function init(self)
+    self.status = gui.get_node("status")
+    self.ammo = gui.get_node("ammo")
+    gui.set_text(self.status, "SWAT BREACH PROTOCOL | NPC READY | AIM READY")
+    gui.set_text(self.ammo, "AMMO 30/120")
+end
+
+function set_status(self, text)
+    gui.set_text(self.status, text)
+end
+
+return M

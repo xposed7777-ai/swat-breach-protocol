@@ -22,11 +22,11 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
-      - name: setup java 25
+      - name: setup java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: "17"
 
       - name: setup android sdk
         uses: android-actions/setup-android@v3
@@ -35,9 +35,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "platform-tools" "platforms;${android_platform}" "build-tools;${android_build_tools}"
-          sdkmanager --list_installed | grep -E "platform-tools|platforms;${android_platform}|build-tools;${android_build_tools}" || true
+          test -x "$ANDROID_SDK_ROOT/platform-tools/adb"
+          test -d "$ANDROID_SDK_ROOT/platforms/${android_platform}"
+          test -d "$ANDROID_SDK_ROOT/build-tools/${android_build_tools}"
 
       - name: download defold bob
         shell: bash
@@ -48,7 +50,8 @@ jobs:
           test -n "$sha"
           curl --fail --location --retry 4 --retry-delay 3 -o .defold/bob.jar "https://d.defold.com/archive/${sha}/bob/bob.jar"
           test -s .defold/bob.jar
-          java -jar .defold/bob.jar --version
+          java -jar .defold/bob.jar --version 2>&1 | tee .defold/bob-version.txt || true
+          grep -F "bob.jar version" .defold/bob-version.txt
 
       - name: verify defold project
         shell: bash
@@ -61,7 +64,10 @@ jobs:
           test -f gui/hud.gui
           test -f gui/hud.gui_script
           test -d assets
-          ! find . -maxdepth 2 -type f \( -name 'project.godot' -o -name 'export_presets.cfg' \) | grep -q .
+          if find . -maxdepth 2 -type f \( -name 'project.godot' -o -name 'export_presets.cfg' \) | grep -q .; then
+            echo "error: old godot project files are still present"
+            exit 1
+          fi
 
       - name: gameplay smoke test build
         shell: bash
@@ -76,10 +82,12 @@ jobs:
             --archive \
             --bundle-output build/smoke \
             resolve build bundle
-          exe="$(find build/smoke -type f -executable | head -n 1)"
+          exe="$(find build/smoke -type f -executable -print -quit)"
           test -n "$exe"
-          timeout 10s "$exe" > build/smoke/gameplay.log 2>&1 || status=$?
-          status=${status:-0}
+          set +e
+          timeout 15s "$exe" > build/smoke/gameplay.log 2>&1
+          status=$?
+          set -e
           cat build/smoke/gameplay.log
           grep -F "gameplay smoke test: PASS — npc, hud/gui, fire, reload, aim, weapon switch" build/smoke/gameplay.log
           test "$status" -eq 0 || test "$status" -eq 124
@@ -88,6 +96,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p .defold
           keytool -genkeypair -v -noprompt \
             -keystore .defold/debug.keystore \
             -storepass android \
@@ -97,7 +106,6 @@ jobs:
             -keysize 2048 \
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
-          printf '%s' android > .defold/debug.keystore.pass.txt
 
       - name: build android debug apk
         shell: bash
@@ -108,7 +116,6 @@ jobs:
           java -jar .defold/bob.jar \
             --root . \
             --platform arm64-android \
-            --architectures arm64-android \
             --variant debug \
             --bundle-format apk \
             --archive \
@@ -117,7 +124,7 @@ jobs:
             --keystore-alias androiddebugkey \
             --keystore-pass android \
             resolve build bundle
-          apk="$(find build/android -type f -name '*.apk' | head -n 1)"
+          apk="$(find build/android -type f -name '*.apk' -print -quit)"
           test -n "$apk"
           cp "$apk" build/swat-breach-protocol-debug.apk
           test -s build/swat-breach-protocol-debug.apk
@@ -154,4 +161,4 @@ jobs:
           if [ -s build/swat-breach-protocol-debug.apk ]; then echo "apk: PASS" >> "$GITHUB_STEP_SUMMARY"; else echo "apk: FAIL" >> "$GITHUB_STEP_SUMMARY"; fi
           if [ -s build/gofile-url.txt ]; then echo "gofile: $(cat build/gofile-url.txt)" >> "$GITHUB_STEP_SUMMARY"; fi
           echo "gameplay smoke test: npc, hud/gui, fire, reload, aim, weapon switch" >> "$GITHUB_STEP_SUMMARY"
-          echo "gofile receives APK only; game assets stay in the repository/build" >> "$GITHUB_STEP_SUMMARY"
+          echo "gofile receives APK only; game assets stay in the repository" >> "$GITHUB_STEP_SUMMARY"
